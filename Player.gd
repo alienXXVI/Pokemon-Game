@@ -1,9 +1,22 @@
 extends KinematicBody2D
 
+signal player_moving_signal
+signal player_stopped_signal
+
+const LandingDustEffect = preload("res://LandingDustEffect.tscn")
+
 export var walk_speed = 4.0
+export var jump_speed = 4.0
+
 const TILE_SIZE = 16
+
 onready var anim_tree = $AnimationTree
 onready var anim_state = anim_tree.get("parameters/playback")
+onready var ray = $BlockingRayCast2D
+onready var ledge_ray = $LedgeRayCast2D
+onready var shadow = $Shadow
+
+var jumping_over_ledge: bool = false
 
 enum PlayerState { IDLE, TURNING, WALKING }
 enum FacingDirection { LEFT, RIGHT, UP, DOWN }
@@ -20,6 +33,7 @@ var percent_moved_to_next_tile = 0.0
 func _ready():
 	anim_tree.active = true
 	initial_position = position
+	shadow.visible = false
 	
 
 func _physics_process(delta):
@@ -86,10 +100,42 @@ func finished_turning():
 			
 
 func move(delta):
-	percent_moved_to_next_tile += walk_speed * delta
-	if percent_moved_to_next_tile >= 1.0:
-		position = initial_position + (TILE_SIZE * input_direction)
-		percent_moved_to_next_tile = 0.0
-		is_moving = false
+	var desired_step: Vector2 = input_direction * TILE_SIZE / 2
+	ray.cast_to = desired_step
+	ray.force_raycast_update()
+	
+	ledge_ray.cast_to = desired_step
+	ledge_ray.force_raycast_update()
+	
+	if (ledge_ray.is_colliding() && input_direction == Vector2(0, 1)) or jumping_over_ledge:
+		percent_moved_to_next_tile += jump_speed * delta
+		if percent_moved_to_next_tile >= 2.0:
+			position = initial_position + (input_direction * TILE_SIZE * 2)
+			percent_moved_to_next_tile = 0.0
+			is_moving = false
+			jumping_over_ledge = false
+			shadow.visible = false
+			
+			var dust_effect = LandingDustEffect.instance()
+			dust_effect.position = position
+			get_tree().current_scene.add_child(dust_effect)
+			
+		else:
+			shadow.visible = true
+			jumping_over_ledge = true
+			var input = input_direction.y * TILE_SIZE * percent_moved_to_next_tile
+			position.y = initial_position.y + (-0.96 - 0.53 * input + 0.05 * pow(input, 2))
+		
+	elif !ray.is_colliding():
+		if percent_moved_to_next_tile == 0:
+			emit_signal("player_moving_signal")
+		percent_moved_to_next_tile += walk_speed * delta
+		if percent_moved_to_next_tile >= 1.0:
+			position = initial_position + (TILE_SIZE * input_direction)
+			percent_moved_to_next_tile = 0.0
+			is_moving = false
+			emit_signal("player_stopped_signal")
+		else:
+			position = initial_position + (TILE_SIZE * input_direction * percent_moved_to_next_tile)
 	else:
-		position = initial_position + (TILE_SIZE * input_direction * percent_moved_to_next_tile)
+		is_moving = false
